@@ -1,15 +1,101 @@
 /**
  * Demand Gen Call Center Controller
  * Только Telegram уведомления
+ * Страна определяется автоматически из таргетирования кампании
+ * Окна конвертируются из MSK в часовой пояс аккаунта с учётом DST
  */
 
 // ===== КОНФИГУРАЦИЯ =====
 const CONFIG = {
   tgBotToken: "YOUR_BOT_TOKEN_HERE",
   tgChatId: "YOUR_CHAT_ID_HERE",
+  baseTimezone: "Europe/Moscow",
+  
+  // Маппинг кодов стран на полные названия
+  countryMap: {
+    "1015": "Canada",
+    "2840": "United States",
+    "2356": "India",
+    "2410": "South Korea",
+    "2826": "United Kingdom",
+    "2250": "France",
+    "2276": "Germany",
+    "2124": "Australia",
+    "2392": "Japan",
+    "2504": "Spain",
+    "2380": "Italy",
+    "2528": "Netherlands",
+    "2372": "Ireland",
+    "2756": "Switzerland",
+    "2036": "Austria",
+    "2578": "Belgium",
+    "2620": "Portugal",
+    "2703": "Czech Republic",
+    "2616": "Poland",
+    "2752": "Sweden",
+    "2208": "Denmark",
+    "2233": "Estonia",
+    "2440": "Lithuania",
+    "2643": "Russian Federation",
+    "2702": "Singapore",
+    "2158": "Taiwan",
+    "2360": "Indonesia",
+    "2458": "Malaysia",
+    "2608": "Philippines",
+    "2764": "Thailand",
+    "2704": "Vietnam",
+    "2344": "Hong Kong",
+    "2156": "China",
+    "2554": "New Zealand",
+    "2484": "Mexico",
+    "2170": "Colombia",
+    "2076": "Brazil",
+    "2578": "Sweden",
+    "2246": "Finland",
+    "2578": "Norway"
+  },
+
+  // Окна по странам (в MSK - Europe/Moscow)
   windows: {
-    IN: { startH: 17, startM: 30, endH: 6,  endM: 30 },
-    KR: { startH: 21, startM: 0,  endH: 10, endM: 0  }
+    "Japan": { startH: 23, startM: 0, endH: 16, endM: 0 },
+    "South Korea": { startH: 23, startM: 0, endH: 17, endM: 0 },
+    "Australia": { startH: 0, startM: 0, endH: 13, endM: 0 },
+    "Singapore": { startH: 2, startM: 0, endH: 19, endM: 0 },
+    "Malaysia": { startH: 23, startM: 0, endH: 19, endM: 0 },
+    "France": { startH: 8, startM: 0, endH: 22, endM: 0 },
+    "United Kingdom": { startH: 8, startM: 0, endH: 22, endM: 0 },
+    "Austria": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Italy": { startH: 8, startM: 0, endH: 21, endM: 0 },
+    "Portugal": { startH: 9, startM: 0, endH: 23, endM: 0 },
+    "Spain": { startH: 8, startM: 0, endH: 22, endM: 0 },
+    "Netherlands": { startH: 10, startM: 0, endH: 22, endM: 0 },
+    "Norway": { startH: 9, startM: 0, endH: 23, endM: 0 },
+    "Sweden": { startH: 9, startM: 0, endH: 22, endM: 0 },
+    "Denmark": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Finland": { startH: 9, startM: 0, endH: 23, endM: 0 },
+    "Canada": { startH: 15, startM: 0, endH: 4, endM: 0 },
+    "Mexico": { startH: 15, startM: 0, endH: 2, endM: 0 },
+    "Colombia": { startH: 12, startM: 0, endH: 2, endM: 0 },
+    "Brazil": { startH: 15, startM: 0, endH: 2, endM: 0 },
+    "India": { startH: 17, startM: 30, endH: 6, endM: 30 },
+    "United States": { startH: 15, startM: 0, endH: 4, endM: 0 },
+    "Germany": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Belgium": { startH: 9, startM: 0, endH: 22, endM: 0 },
+    "Poland": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Czech Republic": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Ireland": { startH: 8, startM: 0, endH: 22, endM: 0 },
+    "Switzerland": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Estonia": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Lithuania": { startH: 9, startM: 0, endH: 21, endM: 0 },
+    "Russian Federation": { startH: 15, startM: 0, endH: 4, endM: 0 },
+    "Taiwan": { startH: 23, startM: 0, endH: 17, endM: 0 },
+    "Indonesia": { startH: 2, startM: 0, endH: 19, endM: 0 },
+    "Philippines": { startH: 0, startM: 0, endH: 16, endM: 0 },
+    "Thailand": { startH: 1, startM: 0, endH: 18, endM: 0 },
+    "Vietnam": { startH: 0, startM: 0, endH: 17, endM: 0 },
+    "Hong Kong": { startH: 0, startM: 0, endH: 17, endM: 0 },
+    "China": { startH: 0, startM: 0, endH: 17, endM: 0 },
+    "New Zealand": { startH: 1, startM: 0, endH: 14, endM: 0 }
   }
 };
 
@@ -24,13 +110,29 @@ function main() {
     const rawId = account.getCustomerId();
     const accountId = formatCustomerId_(rawId);
 
-    // Проверяем статус аккаунта
-    checkAccountStatusAndAlert_(rawId, accountId);
+    // Вытягиваем страну из таргетирования кампании
+    const country = getCountryFromCampaign_();
 
-    // Определяем регион и окно
-    const region = detectRegion_();
-    const w = CONFIG.windows[region];
-    const inWindow = isInWindow_(w.startH, w.startM, w.endH, w.endM);
+    // Проверяем статус аккаунта
+    checkAccountStatusAndAlert_(rawId, accountId, tz);
+
+    // Получаем базовое окно для страны
+    const baseWindow = CONFIG.windows[country];
+    if (!baseWindow) {
+      Logger.log(`No window configured for country: ${country}`);
+      tgOncePerHour_(
+        `no_window_${rawId}`,
+        `📌 <b>${country}</b>\n\n` +
+        `⚠️ NO WINDOW CONFIGURED\n` +
+        `Account ID: <b>${accountId}</b>\n` +
+        `Country: ${country} not found in CONFIG.windows`
+      );
+      return;
+    }
+
+    // Конвертируем окно из MSK в часовой пояс аккаунта
+    const convertedWindow = convertWindowToTimezone_(baseWindow, CONFIG.baseTimezone, tz);
+    const inWindow = isInWindow_(convertedWindow.startH, convertedWindow.startM, convertedWindow.endH, convertedWindow.endM, tz);
 
     // Ищем Demand Gen объявление
     const rows = AdsApp.search(`
@@ -52,7 +154,11 @@ function main() {
     if (ads.length !== 1) {
       tgOncePerHour_(
         `safety_${rawId}`,
-        `🚨 SAFETY STOP\nAccount ID: ${accountId}\nFound Demand Gen ads: ${ads.length}\nAction: NONE`
+        `📌 <b>${country}</b>\n\n` +
+        `🚨 SAFETY STOP\n` +
+        `Account ID: <b>${accountId}</b>\n` +
+        `Found Demand Gen ads: ${ads.length}\n` +
+        `Action: NONE`
       );
       return;
     }
@@ -73,30 +179,155 @@ function main() {
         }
       });
 
-      const stats = getStats_(["TODAY"]);
+      const stats = getStats_(["TODAY", "LIFETIME"]);
       const nowStr = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd HH:mm");
+      const currency = account.getCurrencyCode();
+      const exchangeRate = getExchangeRate_(currency);
 
       tgSend_(
+        `📌 <b>${country}</b>\n\n` +
         `${desired === "ENABLED" ? "🟢 ON" : "🔴 OFF"} Demand Gen\n` +
-        `Account ID: ${accountId}\n` +
-        `Region: ${region}\n` +
+        `Account ID: <b>${accountId}</b>\n` +
         `Time: ${nowStr} (${tz})\n` +
-        `Window: ${fmtWindow_(w)}\n` +
+        `Window: ${fmtWindow_(convertedWindow)} (${tz})\n` +
         `Status: ${current} → ${desired}\n\n` +
         `📊 TODAY\n` +
-        `Spend: ${stats.TODAY.cost.toFixed(2)} ${stats.currency}\n` +
+        `Spend: ${stats.TODAY.cost.toFixed(2)} ${currency} (${formatUSD_(stats.TODAY.cost, exchangeRate)})\n` +
         `Clicks: ${stats.TODAY.clicks}\n` +
-        `Leads: ${stats.TODAY.conv}`
+        `Leads: ${stats.TODAY.conv}\n` +
+        `Cost/Lead: ${formatUSD_(stats.TODAY.conv > 0 ? stats.TODAY.cost / stats.TODAY.conv : 0, exchangeRate)}\n\n` +
+        `📈 LIFETIME\n` +
+        `Spend: ${stats.LIFETIME.cost.toFixed(2)} ${currency} (${formatUSD_(stats.LIFETIME.cost, exchangeRate)})\n` +
+        `Clicks: ${stats.LIFETIME.clicks}\n` +
+        `Leads: ${stats.LIFETIME.conv}\n` +
+        `Cost/Lead: ${formatUSD_(stats.LIFETIME.conv > 0 ? stats.LIFETIME.cost / stats.LIFETIME.conv : 0, exchangeRate)}`
       );
     }
 
   } catch (e) {
     tgSend_(
+      `📌 <b>Unknown</b>\n\n` +
       `❌ ERROR\n` +
       `Error: ${e.toString()}\n` +
-      `Time: ${new Date().toString()}`
+      `Time: ${new Date().toString()}`,
+      true
     );
   }
+}
+
+// ===== КОНВЕРТАЦИЯ ОКНА МЕЖДУ ЧАСОВЫМИ ПОЯСАМИ =====
+
+function convertWindowToTimezone_(baseWindow, fromTz, toTz) {
+  try {
+    const now = new Date();
+
+    // Получаем смещения часовых поясов (учитывает DST)
+    const fromOffset = getTimezoneOffset_(now, fromTz);
+    const toOffset = getTimezoneOffset_(now, toTz);
+    
+    // Разница между часовыми поясами в минутах
+    const offsetDiff = toOffset - fromOffset;
+
+    // Конвертируем время начала и конца
+    let startMins = baseWindow.startH * 60 + baseWindow.startM + offsetDiff;
+    let endMins = baseWindow.endH * 60 + baseWindow.endM + offsetDiff;
+
+    // Нормализуем время
+    startMins = normalizeTime_(startMins);
+    endMins = normalizeTime_(endMins);
+
+    return {
+      startH: Math.floor(startMins / 60),
+      startM: startMins % 60,
+      endH: Math.floor(endMins / 60),
+      endM: endMins % 60
+    };
+  } catch (e) {
+    Logger.log(`Error converting window: ${e.toString()}`);
+    return baseWindow;
+  }
+}
+
+function getTimezoneOffset_(date, tz) {
+  try {
+    // Формати��уем дату в целевом часовом поясе
+    const formatter = Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+
+    const parts = formatter.formatToParts(date);
+    
+    // Извлекаем части даты/времени
+    let year, month, day, hour, minute, second;
+    for (const part of parts) {
+      switch (part.type) {
+        case 'year': year = parseInt(part.value); break;
+        case 'month': month = parseInt(part.value) - 1; break;
+        case 'day': day = parseInt(part.value); break;
+        case 'hour': hour = parseInt(part.value); break;
+        case 'minute': minute = parseInt(part.value); break;
+        case 'second': second = parseInt(part.value); break;
+      }
+    }
+
+    const tzDate = new Date(year, month, day, hour, minute, second);
+    
+    // Вычисляем смещение в минутах
+    const diff = date.getTime() - tzDate.getTime();
+    return -diff / (1000 * 60);
+  } catch (e) {
+    Logger.log(`Error getting timezone offset: ${e.toString()}`);
+    return 0;
+  }
+}
+
+function normalizeTime_(mins) {
+  // Приводим время к формату 0-1439 (0:00 - 23:59)
+  mins = Math.floor(mins);
+  
+  if (mins < 0) {
+    mins = ((mins % 1440) + 1440) % 1440;
+  } else if (mins >= 1440) {
+    mins = mins % 1440;
+  }
+  
+  return mins;
+}
+
+// ===== ВЫТЯГИВАНИЕ СТРАНЫ ИЗ ТАРГЕТИРОВАНИЯ =====
+
+function getCountryFromCampaign_() {
+  try {
+    const rows = AdsApp.search(`
+      SELECT
+        campaign_criterion.location.geo_target_constant
+      FROM campaign_criterion
+      WHERE campaign.advertising_channel_type = 'DEMAND_GEN'
+        AND campaign_criterion.type = 'LOCATION'
+      LIMIT 1
+    `);
+
+    if (rows.hasNext()) {
+      const geoCode = rows.next().campaignCriterion.location.geoTargetConstant;
+      const country = CONFIG.countryMap[geoCode];
+      
+      if (country) {
+        Logger.log(`Country detected: ${country}`);
+        return country;
+      }
+    }
+  } catch (e) {
+    Logger.log("Failed to get country from campaign: " + e.toString());
+  }
+
+  return "Unknown";
 }
 
 // ===== ВАЛИДАЦИЯ =====
@@ -112,7 +343,7 @@ function validateConfig_() {
 
 // ===== ПРОВЕРКА СТАТУСА АККАУНТА =====
 
-function checkAccountStatusAndAlert_(rawId, formattedId) {
+function checkAccountStatusAndAlert_(rawId, formattedId, tz) {
   try {
     const r = AdsApp.search(`
       SELECT
@@ -126,27 +357,33 @@ function checkAccountStatusAndAlert_(rawId, formattedId) {
     const status = r.next().customer.status;
 
     if (status && status !== "ENABLED") {
-      const stats = getStats_(["TODAY", "LAST_7_DAYS"]);
+      const stats = getStats_(["TODAY", "LIFETIME"]);
       const reason = explainStatusBestEffort_(status);
+      const currency = AdsApp.currentAccount().getCurrencyCode();
+      const exchangeRate = getExchangeRate_(currency);
+      const country = getCountryFromCampaign_();
 
       tgOncePerHour_(
         `ban_${rawId}`,
+        `📌 <b>${country}</b>\n\n` +
         `🚫 ACCOUNT ISSUE DETECTED\n` +
-        `Account ID: ${formattedId}\n` +
+        `Account ID: <b>${formattedId}</b>\n` +
         `Status: ${status}\n` +
         `Reason: ${reason}\n\n` +
         `📊 TODAY\n` +
-        `Spend: ${stats.TODAY.cost.toFixed(2)} ${stats.currency}\n` +
+        `Spend: ${stats.TODAY.cost.toFixed(2)} ${currency} (${formatUSD_(stats.TODAY.cost, exchangeRate)})\n` +
         `Clicks: ${stats.TODAY.clicks}\n` +
-        `Leads: ${stats.TODAY.conv}\n\n` +
-        `📊 LAST 7 DAYS\n` +
-        `Spend: ${stats.LAST_7_DAYS.cost.toFixed(2)} ${stats.currency}\n` +
-        `Clicks: ${stats.LAST_7_DAYS.clicks}\n` +
-        `Leads: ${stats.LAST_7_DAYS.conv}`
+        `Leads: ${stats.TODAY.conv}\n` +
+        `Cost/Lead: ${formatUSD_(stats.TODAY.conv > 0 ? stats.TODAY.cost / stats.TODAY.conv : 0, exchangeRate)}\n\n` +
+        `📈 LIFETIME\n` +
+        `Spend: ${stats.LIFETIME.cost.toFixed(2)} ${currency} (${formatUSD_(stats.LIFETIME.cost, exchangeRate)})\n` +
+        `Clicks: ${stats.LIFETIME.clicks}\n` +
+        `Leads: ${stats.LIFETIME.conv}\n` +
+        `Cost/Lead: ${formatUSD_(stats.LIFETIME.conv > 0 ? stats.LIFETIME.cost / stats.LIFETIME.conv : 0, exchangeRate)}`
       );
     }
   } catch (e) {
-    // Молча пропускаем если ошибка
+    Logger.log("Error checking account status: " + e.toString());
   }
 }
 
@@ -157,17 +394,83 @@ function explainStatusBestEffort_(status) {
   return "Non-enabled status (check UI/email).";
 }
 
-// ===== РЕГИОН И ВРЕМЯ =====
+// ===== КОНВЕРТАЦИЯ ВАЛЮТ =====
 
-function detectRegion_() {
-  const cur = AdsApp.currentAccount().getCurrencyCode();
-  if (cur === "INR") return "IN";
-  if (cur === "KRW") return "KR";
-  throw new Error(`Unsupported currency: ${cur}`);
+function getExchangeRate_(currency) {
+  const rates = {
+    INR: 0.012,
+    KRW: 0.00075,
+    CAD: 0.74,
+    MXN: 0.058,
+    COP: 0.00025,
+    BRL: 0.20,
+    EUR: 1.08,
+    GBP: 1.27,
+    JPY: 0.0067,
+    AUD: 0.66,
+    SGD: 0.74,
+    MYR: 0.20,
+    SEK: 0.093,
+    NOK: 0.094,
+    DKK: 0.145,
+    CHF: 1.12,
+    CZK: 0.042,
+    PLN: 0.25,
+    HKD: 0.128,
+    CNY: 0.138,
+    TWD: 0.031,
+    IDR: 0.000063,
+    PHP: 0.018,
+    THB: 0.029,
+    VND: 0.000039,
+    NZD: 0.61
+  };
+
+  if (rates[currency]) {
+    return rates[currency];
+  }
+
+  try {
+    const response = UrlFetchApp.fetch(
+      `https://api.exchangerate-api.com/v4/latest/${currency}`,
+      { muteHttpExceptions: true }
+    );
+
+    if (response.getResponseCode() === 200) {
+      const data = JSON.parse(response.getContentText());
+      const rate = data.rates.USD;
+
+      const props = PropertiesService.getScriptProperties();
+      props.setProperty(`rate_${currency}`, rate.toString());
+
+      Logger.log(`Exchange rate updated for ${currency}: 1 = ${rate} USD`);
+      return rate;
+    }
+  } catch (e) {
+    Logger.log(`Failed to fetch exchange rate: ${e.toString()}`);
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const cachedRate = props.getProperty(`rate_${currency}`);
+  if (cachedRate) {
+    return parseFloat(cachedRate);
+  }
+
+  return 1;
 }
 
-function isInWindow_(sh, sm, eh, em) {
-  const tz = AdsApp.currentAccount().getTimeZone();
+function convertToUSD_(amount, rate) {
+  return amount * rate;
+}
+
+function formatUSD_(amount, rate) {
+  const usd = convertToUSD_(amount, rate);
+  return `$${usd.toFixed(2)} USD`;
+}
+
+// ===== ПРОВЕРКА ВРЕМЕНИ =====
+
+function isInWindow_(sh, sm, eh, em, tz) {
   const hh = Number(Utilities.formatDate(new Date(), tz, "HH"));
   const mm = Number(Utilities.formatDate(new Date(), tz, "mm"));
 
@@ -208,7 +511,7 @@ function getStats_(ranges) {
         metrics.clicks,
         metrics.conversions
       FROM campaign
-      WHERE segments.date DURING ${range}
+      WHERE ${range === "LIFETIME" ? "TRUE" : `segments.date DURING ${range}`}
     `);
 
     let cost = 0, clicks = 0, conv = 0;
@@ -227,7 +530,7 @@ function getStats_(ranges) {
 
 // ===== TELEGRAM =====
 
-function tgSend_(text) {
+function tgSend_(text, isHtml = true) {
   try {
     UrlFetchApp.fetch(`https://api.telegram.org/bot${CONFIG.tgBotToken}/sendMessage`, {
       method: "post",
@@ -235,12 +538,13 @@ function tgSend_(text) {
       payload: JSON.stringify({
         chat_id: CONFIG.tgChatId,
         text: text,
+        parse_mode: isHtml ? "HTML" : "Markdown",
         disable_web_page_preview: true
       }),
       muteHttpExceptions: true
     });
   } catch (e) {
-    // Молча игнорируем ошибки Telegram
+    Logger.log("Error sending Telegram message: " + e.toString());
   }
 }
 
