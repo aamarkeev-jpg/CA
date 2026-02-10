@@ -1,0 +1,257 @@
+/**
+ * Demand Gen Call Center Controller
+ * Только Telegram уведомления
+ */
+
+// ===== КОНФИГУРАЦИЯ =====
+const CONFIG = {
+  tgBotToken: "YOUR_BOT_TOKEN_HERE",
+  tgChatId: "YOUR_CHAT_ID_HERE",
+  windows: {
+    IN: { startH: 17, startM: 30, endH: 6,  endM: 30 },
+    KR: { startH: 21, startM: 0,  endH: 10, endM: 0  }
+  }
+};
+
+// ===== ГЛАВНАЯ ФУНКЦИЯ =====
+
+function main() {
+  try {
+    validateConfig_();
+
+    const account = AdsApp.currentAccount();
+    const tz = account.getTimeZone();
+    const rawId = account.getCustomerId();
+    const accountId = formatCustomerId_(rawId);
+
+    // Проверяем статус аккаунта
+    checkAccountStatusAndAlert_(rawId, accountId);
+
+    // Определяем регион и окно
+    const region = detectRegion_();
+    const w = CONFIG.windows[region];
+    const inWindow = isInWindow_(w.startH, w.startM, w.endH, w.endM);
+
+    // Ищем Demand Gen объявление
+    const rows = AdsApp.search(`
+      SELECT
+        ad_group_ad.resource_name,
+        ad_group_ad.status
+      FROM ad_group_ad
+      WHERE campaign.advertising_channel_type = 'DEMAND_GEN'
+        AND ad_group_ad.status != 'REMOVED'
+    `);
+
+    const ads = [];
+    while (rows.hasNext()) {
+      ads.push(rows.next());
+      if (ads.length > 2) break;
+    }
+
+    // Safety check
+    if (ads.length !== 1) {
+      tgOncePerHour_(
+        `safety_${rawId}`,
+        `🚨 SAFETY STOP\nAccount ID: ${accountId}\nFound Demand Gen ads: ${ads.length}\nAction: NONE`
+      );
+      return;
+    }
+
+    const ad = ads[0];
+    const current = ad.adGroupAd.status;
+    const desired = inWindow ? "ENABLED" : "PAUSED";
+
+    // Если статус изменился
+    if (current !== desired) {
+      AdsApp.mutate({
+        adGroupAdOperation: {
+          update: {
+            resourceName: ad.adGroupAd.resourceName,
+            status: desired
+          },
+          updateMask: "status"
+        }
+      });
+
+      const stats = getStats_(["TODAY"]);
+      const nowStr = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd HH:mm");
+
+      tgSend_(
+        `${desired === "ENABLED" ? "🟢 ON" : "🔴 OFF"} Demand Gen\n` +
+        `Account ID: ${accountId}\n` +
+        `Region: ${region}\n` +
+        `Time: ${nowStr} (${tz})\n` +
+        `Window: ${fmtWindow_(w)}\n` +
+        `Status: ${current} → ${desired}\n\n` +
+        `📊 TODAY\n` +
+        `Spend: ${stats.TODAY.cost.toFixed(2)} ${stats.currency}\n` +
+        `Clicks: ${stats.TODAY.clicks}\n` +
+        `Leads: ${stats.TODAY.conv}`
+      );
+    }
+
+  } catch (e) {
+    tgSend_(
+      `❌ ERROR\n` +
+      `Error: ${e.toString()}\n` +
+      `Time: ${new Date().toString()}`
+    );
+  }
+}
+
+// ===== ВАЛИДАЦИЯ =====
+
+function validateConfig_() {
+  if (!CONFIG.tgBotToken || CONFIG.tgBotToken === "YOUR_BOT_TOKEN_HERE") {
+    throw new Error("Configure CONFIG.tgBotToken");
+  }
+  if (!CONFIG.tgChatId || CONFIG.tgChatId === "YOUR_CHAT_ID_HERE") {
+    throw new Error("Configure CONFIG.tgChatId");
+  }
+}
+
+// ===== ПРОВЕРКА СТАТУСА АККАУНТА =====
+
+function checkAccountStatusAndAlert_(rawId, formattedId) {
+  try {
+    const r = AdsApp.search(`
+      SELECT
+        customer.status
+      FROM customer
+      LIMIT 1
+    `);
+
+    if (!r.hasNext()) return;
+
+    const status = r.next().customer.status;
+
+    if (status && status !== "ENABLED") {
+      const stats = getStats_(["TODAY", "LAST_7_DAYS"]);
+      const reason = explainStatusBestEffort_(status);
+
+      tgOncePerHour_(
+        `ban_${rawId}`,
+        `🚫 ACCOUNT ISSUE DETECTED\n` +
+        `Account ID: ${formattedId}\n` +
+        `Status: ${status}\n` +
+        `Reason: ${reason}\n\n` +
+        `📊 TODAY\n` +
+        `Spend: ${stats.TODAY.cost.toFixed(2)} ${stats.currency}\n` +
+        `Clicks: ${stats.TODAY.clicks}\n` +
+        `Leads: ${stats.TODAY.conv}\n\n` +
+        `📊 LAST 7 DAYS\n` +
+        `Spend: ${stats.LAST_7_DAYS.cost.toFixed(2)} ${stats.currency}\n` +
+        `Clicks: ${stats.LAST_7_DAYS.clicks}\n` +
+        `Leads: ${stats.LAST_7_DAYS.conv}`
+      );
+    }
+  } catch (e) {
+    // Молча пропускаем если ошибка
+  }
+}
+
+function explainStatusBestEffort_(status) {
+  if (status === "SUSPENDED") return "Suspended by Google (check policy/billing/security in UI/email).";
+  if (status === "CLOSED") return "Closed account (check UI/email).";
+  if (status === "CANCELED") return "Canceled account (check UI/email).";
+  return "Non-enabled status (check UI/email).";
+}
+
+// ===== РЕГИОН И ВРЕМЯ =====
+
+function detectRegion_() {
+  const cur = AdsApp.currentAccount().getCurrencyCode();
+  if (cur === "INR") return "IN";
+  if (cur === "KRW") return "KR";
+  throw new Error(`Unsupported currency: ${cur}`);
+}
+
+function isInWindow_(sh, sm, eh, em) {
+  const tz = AdsApp.currentAccount().getTimeZone();
+  const hh = Number(Utilities.formatDate(new Date(), tz, "HH"));
+  const mm = Number(Utilities.formatDate(new Date(), tz, "mm"));
+
+  const now = hh * 60 + mm;
+  const start = sh * 60 + sm;
+  const end = eh * 60 + em;
+
+  return start < end
+    ? now >= start && now < end
+    : now >= start || now < end;
+}
+
+function fmtWindow_(w) {
+  return `${pad2_(w.startH)}:${pad2_(w.startM)}–${pad2_(w.endH)}:${pad2_(w.endM)}`;
+}
+
+function pad2_(n) {
+  return String(n).padStart(2, "0");
+}
+
+function formatCustomerId_(id) {
+  if (!id) return "unknown";
+  if (id.includes("-")) return id;
+  if (id.length === 10) return id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3");
+  return id;
+}
+
+// ===== СТАТИСТИКА =====
+
+function getStats_(ranges) {
+  const currency = AdsApp.currentAccount().getCurrencyCode();
+  const out = { currency };
+
+  for (const range of ranges) {
+    const rows = AdsApp.search(`
+      SELECT
+        metrics.cost_micros,
+        metrics.clicks,
+        metrics.conversions
+      FROM campaign
+      WHERE segments.date DURING ${range}
+    `);
+
+    let cost = 0, clicks = 0, conv = 0;
+    while (rows.hasNext()) {
+      const r = rows.next();
+      cost += Number(r.metrics.costMicros || 0);
+      clicks += Number(r.metrics.clicks || 0);
+      conv += Number(r.metrics.conversions || 0);
+    }
+
+    out[range] = { cost: cost / 1e6, clicks, conv };
+  }
+
+  return out;
+}
+
+// ===== TELEGRAM =====
+
+function tgSend_(text) {
+  try {
+    UrlFetchApp.fetch(`https://api.telegram.org/bot${CONFIG.tgBotToken}/sendMessage`, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({
+        chat_id: CONFIG.tgChatId,
+        text: text,
+        disable_web_page_preview: true
+      }),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    // Молча игнорируем ошибки Telegram
+  }
+}
+
+function tgOncePerHour_(key, text) {
+  const props = PropertiesService.getScriptProperties();
+  const tz = AdsApp.currentAccount().getTimeZone();
+  const hour = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd_HH");
+  const k = `tg_hour_${key}_${hour}`;
+
+  if (props.getProperty(k)) return;
+
+  props.setProperty(k, "1");
+  tgSend_(text);
+}
